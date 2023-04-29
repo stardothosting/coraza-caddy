@@ -16,7 +16,7 @@ jobs:
   test:
     strategy:
       matrix:
-        go-version: [1.18.x]
+        go-version: [1.19.x]
         os: [ubuntu-latest]
         xcaddy-version: [v0.3.2]
     runs-on: ${{ matrix.os }}
@@ -25,16 +25,21 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: ${{ matrix.go-version }}
+
       - name: Checkout code
         uses: actions/checkout@v2
         with:
           lfs: true
           fetch-depth: 0 #for better blame info
+
       - name: Tests and coverage
         run: go run mage.go coverage
+
       - name: Install xcaddy
         run: go install github.com/caddyserver/xcaddy/cmd/xcaddy@${{ matrix.xcaddy-version }}
+
       - name: Build caddy
-        run: go run mage.go buildLinux
+        run: go run mage.go buildCaddyLinux
+
       - name: Run e2e tests
         run: go run mage.go e2e
