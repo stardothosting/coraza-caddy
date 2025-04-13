@@ -180,7 +180,7 @@ func (e noopEvent) Uint(string, uint) debuglog.Event             { return e }
 func (e noopEvent) Stringer(string, fmt.Stringer) debuglog.Event { return e }
 func (e noopEvent) IsEnabled() bool                              { return false }
 
-func (l *logger) LogTransaction(tx *corazawaf.Transaction) {
+func (l *logger) LogTransaction(tx *Transaction) {
 	logEntry := map[string]interface{}{
 		"hostname": tx.Variables().GetFirstString("REQUEST_HEADERS:Host"),
 	}
