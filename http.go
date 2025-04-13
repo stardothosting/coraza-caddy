@@ -8,7 +8,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 
+	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/corazawaf/coraza/v3/types"
 )
 
@@ -104,4 +106,23 @@ func parseServerName(host string) string {
 	}
 	// anyways serverName is returned
 	return serverName
+}
+
+func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	// Get the hostname from the request
+	hostname := r.Host
+	if idx := strings.Index(hostname, ":"); idx != -1 {
+		hostname = hostname[:idx]
+	}
+
+	tx := m.waf.NewTransaction()
+	defer func() {
+		tx.ProcessLogging()
+		tx.Clean()
+	}()
+
+	// Add hostname to transaction variables
+	tx.AddGetRequestHeader("Host", hostname)
+
+	// ... existing code ...
 }
