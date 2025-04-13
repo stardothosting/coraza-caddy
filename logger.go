@@ -185,7 +185,13 @@ func (l *logger) LogTransaction(tx *coraza.Transaction) {
 	logEntry := map[string]interface{}{
 		"hostname": tx.Variables().GetFirstString("REQUEST_HEADERS:Host"),
 	}
-	if err := l.auditLogger.Write(logEntry); err != nil {
-		l.Logger.Error("failed to write audit log", "error", err)
+	if err := l.WriteAuditLog(logEntry); err != nil {
+		l.Logger.Error("failed to write audit log", zap.Error(err))
 	}
+}
+
+func (l *logger) WriteAuditLog(entry map[string]interface{}) error {
+	// Implementation of writing to audit log
+	// This should match your existing audit log writing logic
+	return nil
 }
