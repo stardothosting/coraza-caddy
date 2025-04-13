@@ -108,7 +108,7 @@ func parseServerName(host string) string {
 	return serverName
 }
 
-func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+func (m *Module) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	// Get the hostname from the request
 	hostname := r.Host
 	if idx := strings.Index(hostname, ":"); idx != -1 {
@@ -125,4 +125,5 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next cadd
 	tx.AddGetRequestHeader("Host", hostname)
 
 	// ... existing code ...
+	return next.ServeHTTP(w, r)
 }
