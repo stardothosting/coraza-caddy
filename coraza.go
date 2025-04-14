@@ -95,8 +95,8 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 
-	// Use the actual constant from Coraza types
-	tx.AddArgument(corazatypes.ServerName, "SERVER_NAME", r.Host)
+	// Try using the variable ID directly
+	tx.AddArgument(11, "SERVER_NAME", r.Host)
 
 	defer func() {
 		tx.ProcessLogging()
