@@ -94,8 +94,8 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	var err error
 	id := randomString(16)
 
-	// Create a logger with the hostname for this request
-	reqLogger := m.logger.With(zap.String("host", r.Host))
+	// Just log the hostname to see what we have access to
+	m.logger.Info("Processing request", zap.String("host", r.Host))
 
 	tx := m.waf.NewTransactionWithID(id)
 
@@ -112,7 +112,7 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	// Use the request-specific logger
 	it, err := processRequest(tx, r)
 	if err != nil {
-		reqLogger.Error("Error processing request", zap.Error(err))
+		m.logger.Error("Error processing request", zap.Error(err))
 		return err
 	}
 	if it != nil {
