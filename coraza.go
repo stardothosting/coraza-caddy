@@ -5,6 +5,7 @@ package coraza
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/experimental"
 	"github.com/corazawaf/coraza/v3/types"
 	"github.com/jcchavezs/mergefs"
 	"github.com/jcchavezs/mergefs/io"
@@ -35,6 +37,7 @@ type corazaModule struct {
 
 	logger *zap.Logger
 	waf    coraza.WAF
+	newTx  func(*http.Request) types.Transaction
 }
 
 // CaddyModule returns the Caddy module information.
@@ -84,7 +87,22 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 
 	var err error
 	m.waf, err = coraza.NewWAF(config)
-	return err
+	if err != nil {
+		return fmt.Errorf("could not create WAF: %v", err)
+	}
+
+	// Check if WAF supports experimental options
+	if ctxwaf, ok := m.waf.(experimental.WAFWithOptions); ok {
+		m.newTx = func(r *http.Request) types.Transaction {
+			return ctxwaf.NewTransactionWithOptions(experimental.Options{
+				Context: r.Context(),
+			})
+		}
+	} else {
+		m.newTx = m.waf.NewTransaction
+	}
+
+	return nil
 }
 
 // Validate implements caddy.Validator.
@@ -96,12 +114,8 @@ var errInterruptionTriggered = errors.New("interruption triggered")
 
 // ServeHTTP implements caddyhttp.MiddlewareHandler.
 func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	id := randomString(16)
-	tx := m.waf.NewTransactionWithID(id)
-	defer func() {
-		tx.ProcessLogging()
-		_ = tx.Close()
-	}()
+	tx := m.newTx(r)
+	defer tx.Close()
 
 	// Early return, Coraza is not going to process any rule
 	if tx.IsRuleEngineOff() {
@@ -111,7 +125,7 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	}
 
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
-	repl.Set("http.transaction_id", id)
+	repl.Set("http.transaction_id", tx.ID())
 
 	// ProcessRequest is just a wrapper around ProcessConnection, ProcessURI,
 	// ProcessRequestHeaders and ProcessRequestBody.
