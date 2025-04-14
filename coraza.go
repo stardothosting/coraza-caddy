@@ -98,6 +98,10 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	reqLogger := m.logger.With(zap.String("host", r.Host))
 
 	tx := m.waf.NewTransactionWithID(id)
+
+	// Set the hostname in the transaction
+	tx.SetAuditProperty("hostname", r.Host)
+
 	defer func() {
 		tx.ProcessLogging()
 		_ = tx.Close()
