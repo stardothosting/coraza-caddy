@@ -1,10 +1,22 @@
-// Copyright 2025 The OWASP Coraza contributors
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2023 Juan Pablo Tosso and the OWASP Coraza contributors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package coraza
 
 import (
-	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -13,11 +25,8 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/types"
-	"github.com/jcchavezs/mergefs"
-	"github.com/jcchavezs/mergefs/io"
 	"go.uber.org/zap"
 )
 
@@ -28,10 +37,8 @@ func init() {
 
 // corazaModule is a Web Application Firewall implementation for Caddy.
 type corazaModule struct {
-	// deprecated
-	Include      []string `json:"include"`
-	Directives   string   `json:"directives"`
-	LoadOWASPCRS bool     `json:"load_owasp_crs"`
+	Include    []string `json:"include"`
+	Directives string   `json:"directives"`
 
 	logger *zap.Logger
 	waf    coraza.WAF
@@ -48,21 +55,12 @@ func (corazaModule) CaddyModule() caddy.ModuleInfo {
 // Provision implements caddy.Provisioner.
 func (m *corazaModule) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger(m)
-
-	config := coraza.NewWAFConfig().
-		WithErrorCallback(newErrorCb(m.logger)).
-		WithDebugLogger(newLogger(m.logger))
-
-	if m.LoadOWASPCRS {
-		config = config.WithRootFS(mergefs.Merge(coreruleset.FS, io.OSFS))
-	}
-
+	config := coraza.NewWAFConfig().WithErrorCallback(logger(m.logger))
 	if m.Directives != "" {
 		config = config.WithDirectives(m.Directives)
 	}
-
+	m.logger.Debug("Preparing to include files", zap.Int("count", len(m.Include)), zap.Strings("files", m.Include))
 	if len(m.Include) > 0 {
-		m.logger.Warn("'include' field is deprecated, please use the Include directive inside 'directives' field instead")
 		for _, file := range m.Include {
 			if strings.Contains(file, "*") {
 				m.logger.Debug("Preparing to expand glob", zap.String("pattern", file))
@@ -81,7 +79,6 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 			}
 		}
 	}
-
 	var err error
 	m.waf, err = coraza.NewWAF(config)
 	return err
@@ -92,52 +89,50 @@ func (m *corazaModule) Validate() error {
 	return nil
 }
 
-var errInterruptionTriggered = errors.New("interruption triggered")
-
 // ServeHTTP implements caddyhttp.MiddlewareHandler.
 func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	var err error
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 	defer func() {
 		tx.ProcessLogging()
 		_ = tx.Close()
 	}()
-
-	// Early return, Coraza is not going to process any rule
-	if tx.IsRuleEngineOff() {
-		// response writer is not going to be wrapped, but used as-is
-		// to generate the response
-		return next.ServeHTTP(w, r)
-	}
-
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 	repl.Set("http.transaction_id", id)
 
-	// ProcessRequest is just a wrapper around ProcessConnection, ProcessURI,
-	// ProcessRequestHeaders and ProcessRequestBody.
-	// It fails if any of these functions returns an error and it stops on interruption.
-	if it, err := processRequest(tx, r); err != nil {
-		return caddyhttp.HandlerError{
-			StatusCode: http.StatusInternalServerError,
-			ID:         tx.ID(),
-			Err:        err,
-		}
-	} else if it != nil {
-		return caddyhttp.HandlerError{
-			StatusCode: obtainStatusCodeFromInterruptionOrDefault(it, http.StatusOK),
-			ID:         tx.ID(),
-			Err:        errInterruptionTriggered,
-		}
-	}
-
-	ww, processResponse := wrap(w, r, tx)
-
-	// We continue with the other middlewares by catching the response
-	if err := next.ServeHTTP(ww, r); err != nil {
+	it, err := processRequest(tx, r)
+	if err != nil {
 		return err
 	}
+	if it != nil {
+		return interrupt(nil, tx, id)
+	}
 
-	return processResponse(tx, r)
+	rec := newStreamRecorder(w, tx)
+	err = next.ServeHTTP(rec, r)
+	if err != nil {
+		return err
+	}
+	// If the response was interrupted during phase 3 or 4 we can stop the response
+	if tx.IsInterrupted() {
+		return interrupt(nil, tx, id)
+	}
+	if !rec.Buffered() {
+		//Nothing to do, response was already sent to the client
+		return nil
+	}
+
+	if status := rec.Status(); status > 0 {
+		w.WriteHeader(status)
+	}
+	// We will send the response provided by Coraza
+	reader, err := rec.Reader()
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(w, reader)
+	return err
 }
 
 // Unmarshal Caddyfile implements caddyfile.Unmarshaler.
@@ -148,35 +143,20 @@ func (m *corazaModule) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	m.Include = []string{}
 	for d.NextBlock(0) {
 		key := d.Val()
+		var value string
+		d.Args(&value)
+		if d.NextArg() {
+			return d.ArgErr()
+		}
 		switch key {
-		case "load_owasp_crs":
-			if d.NextArg() {
-				return d.ArgErr()
-			}
-			m.LoadOWASPCRS = true
-		case "directives", "include":
-			var value string
-			if !d.Args(&value) {
-				// not enough args
-				return d.ArgErr()
-			}
-
-			if d.NextArg() {
-				// too many args
-				return d.ArgErr()
-			}
-
-			switch key {
-			case "include":
-				m.Include = append(m.Include, value)
-			case "directives":
-				m.Directives = value
-			}
+		case "include":
+			m.Include = append(m.Include, value)
+		case "directives":
+			m.Directives = value
 		default:
-			return d.Errf("invalid key %q", key)
+			return d.Err(fmt.Sprintf("invalid key for filter directive: %s", key))
 		}
 	}
-
 	return nil
 }
 
@@ -187,24 +167,46 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 	return m, err
 }
 
-func newErrorCb(logger *zap.Logger) func(types.MatchedRule) {
+func logger(logger *zap.Logger) func(types.MatchedRule) {
 	return func(mr types.MatchedRule) {
-		logMsg := mr.ErrorLog()
+		data := mr.ErrorLog(403)
 		switch mr.Rule().Severity() {
-		case types.RuleSeverityEmergency,
-			types.RuleSeverityAlert,
-			types.RuleSeverityCritical,
-			types.RuleSeverityError:
-			logger.Error(logMsg)
+		case types.RuleSeverityEmergency:
+			logger.Error(data)
+		case types.RuleSeverityAlert:
+			logger.Error(data)
+		case types.RuleSeverityCritical:
+			logger.Error(data)
+		case types.RuleSeverityError:
+			logger.Error(data)
 		case types.RuleSeverityWarning:
-			logger.Warn(logMsg)
+			logger.Warn(data)
 		case types.RuleSeverityNotice:
-			logger.Info(logMsg)
+			logger.Info(data)
 		case types.RuleSeverityInfo:
-			logger.Info(logMsg)
+			logger.Info(data)
 		case types.RuleSeverityDebug:
-			logger.Debug(logMsg)
+			logger.Debug(data)
 		}
+	}
+}
+
+func interrupt(err error, tx types.Transaction, id string) error {
+	if !tx.IsInterrupted() {
+		return caddyhttp.HandlerError{
+			StatusCode: 500,
+			ID:         id,
+			Err:        err,
+		}
+	}
+	status := tx.Interruption().Status
+	if status <= 0 {
+		status = 403
+	}
+	return caddyhttp.HandlerError{
+		StatusCode: status,
+		ID:         id,
+		Err:        err,
 	}
 }
 
