@@ -183,7 +183,7 @@ func (e noopEvent) IsEnabled() bool                              { return false 
 
 func (l *logger) LogTransaction(tx types.Transaction) {
 	logEntry := map[string]interface{}{
-		"hostname": tx.Variables().GetFirstString("REQUEST_HEADERS:Host"),
+		"hostname": tx.GetRequestHeader("Host"),
 	}
 	if err := l.WriteAuditLog(logEntry); err != nil {
 		l.Logger.Error("failed to write audit log", zap.Error(err))
