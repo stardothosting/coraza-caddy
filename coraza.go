@@ -109,19 +109,11 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		_ = tx.Close()
 	}()
 
-	// Early return, Coraza is not going to process any rule
-	if tx.IsRuleEngineOff() {
-		// response writer is not going to be wrapped, but used as-is
-		// to generate the response
-		return next.ServeHTTP(w, r)
-	}
-
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 	repl.Set("http.transaction_id", id)
 
 	// ProcessRequest is just a wrapper around ProcessConnection, ProcessURI,
 	// ProcessRequestHeaders and ProcessRequestBody.
-	// It fails if any of these functions returns an error and it stops on interruption.
 	if it, err := processRequest(tx, r); err != nil {
 		return caddyhttp.HandlerError{
 			StatusCode: http.StatusInternalServerError,
@@ -129,16 +121,12 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 			Err:        err,
 		}
 	} else if it != nil {
-		return caddyhttp.HandlerError{
-			StatusCode: obtainStatusCodeFromInterruptionOrDefault(it, http.StatusOK),
-			ID:         tx.ID(),
-			Err:        errInterruptionTriggered,
-		}
+		w.WriteHeader(obtainStatusCodeFromInterruptionOrDefault(it, http.StatusForbidden))
+		return nil
 	}
 
 	ww, processResponse := wrap(w, r, tx)
 
-	// We continue with the other middlewares by catching the response
 	if err := next.ServeHTTP(ww, r); err != nil {
 		return err
 	}
