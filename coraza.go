@@ -95,8 +95,8 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 
-	// Try using SetVariable directly
-	tx.SetVariable("SERVER_NAME", []string{r.Host})
+	// Try using AddArgument
+	tx.AddArgument("SERVER_NAME", r.Host)
 
 	defer func() {
 		tx.ProcessLogging()
