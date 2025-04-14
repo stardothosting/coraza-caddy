@@ -101,6 +101,9 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 	repl.Set("http.transaction_id", id)
 
+	// Add hostname to logger
+	m.logger = m.logger.With(zap.String("hostname", r.Host))
+
 	it, err := processRequest(tx, r)
 	if err != nil {
 		return err
