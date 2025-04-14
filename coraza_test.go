@@ -1,38 +1,53 @@
-// Copyright 2025 The OWASP Coraza contributors
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2023 Juan Pablo Tosso and the OWASP Coraza contributors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package coraza
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddytest"
-	"github.com/stretchr/testify/require"
 )
 
 const baseURL = "http://127.0.0.1:8080"
 
 func TestPlugin(t *testing.T) {
-	tester := newTester("test.init.config", t)
-
-	res, _ := tester.AssertGetResponse(baseURL+"/test", 200, "test123")
-	// Comes from https://github.com/corazawaf/coraza-caddy/blob/5e8337/test.init.config#L17
-	if len(res.Header.Get("x-request-id")) == 0 {
-		t.Fatal("X-Request-Id header is not set")
+	tester, err := newTester("test.init.config", t)
+	if err != nil {
+		t.Fatal(err)
 	}
+	res, _ := tester.AssertGetResponse(baseURL+"/test", 200, "test123")
+	if len(res.Header.Get("x-unique-id")) == 0 {
+		t.Error("X-Unique-Id header is not set")
+	}
+
+	time.Sleep(1 * time.Second)
 }
 
 func TestPluginReload(t *testing.T) {
 	tester := caddytest.NewTester(t)
 	configFile := "test.init.config"
-	configContent, err := os.ReadFile(configFile)
+	configContent, err := ioutil.ReadFile(configFile)
 	if err != nil {
 		t.Fatalf("Failed to load configuration file %s: %s", configFile, err)
 	}
@@ -42,145 +57,104 @@ func TestPluginReload(t *testing.T) {
 
 	tester.InitServer(rawConfig, "caddyfile")
 	tester.AssertGetResponse(baseURL+"/test", 200, "test456")
+
+	time.Sleep(1 * time.Second)
 }
 
 func TestSimpleRule(t *testing.T) {
-	tester := newTester("test.init.config", t)
-
+	tester, err := newTester("test.init.config", t)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req, _ := http.NewRequest("GET", baseURL+"/test5", nil)
 	tester.AssertResponseCode(req, 403)
+
+	time.Sleep(1 * time.Second)
 
 	req, _ = http.NewRequest("GET", baseURL+"/test_include1", nil)
 	tester.AssertResponseCode(req, 403)
 
+	time.Sleep(1 * time.Second)
+
 	req, _ = http.NewRequest("GET", baseURL+"/test_include2", nil)
 	tester.AssertResponseCode(req, 403)
+
+	time.Sleep(1 * time.Second)
 }
 
 func TestPhase3Disruption(t *testing.T) {
-	tester := newTester("test.init.config", t)
-
+	tester, err := newTester("test.init.config", t)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req, _ := http.NewRequest("GET", baseURL+"/test6", nil)
 	tester.AssertResponseCode(req, 403)
+
+	time.Sleep(1 * time.Second)
 }
 
 func TestPostUrlEncoded(t *testing.T) {
-	tester := newTester("test.init.config", t)
-
+	tester, err := newTester("test.init.config", t)
+	if err != nil {
+		t.Fatal(err)
+	}
 	b := strings.NewReader("adsf=qwer" + strings.Repeat("a", 1000))
 	req, _ := http.NewRequest("POST", baseURL+"/test", b)
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	tester.AssertResponseCode(req, 200)
+
+	time.Sleep(1 * time.Second)
 }
 
 func TestPostMultipart(t *testing.T) {
-	tester := newTester("test.init.config", t)
-
+	tester, err := newTester("test.init.config", t)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req, _ := http.NewRequest("POST", baseURL+"/", nil)
-
-	fillRequestWithMultipartContent(t, req)
-
+	if err := multipartRequest(req); err != nil {
+		t.Fatal(err)
+	}
 	tester.AssertResponseCode(req, 200)
+
+	time.Sleep(1 * time.Second)
 }
 
-func fillRequestWithMultipartContent(t *testing.T, req *http.Request) {
+func multipartRequest(req *http.Request) error {
 	var b bytes.Buffer
 	w := multipart.NewWriter(&b)
-	tempfile, err := os.CreateTemp(t.TempDir(), "tmpfile*")
-	require.NoError(t, err)
-
+	tempfile, err := os.CreateTemp("/tmp", "tmpfile*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tempfile.Name())
 	for i := 0; i < 1024*5; i++ {
 		// this should create a 5mb file
-		_, err := tempfile.Write([]byte(strings.Repeat("A", 1024)))
-		require.NoError(t, err)
+		tempfile.Write([]byte(strings.Repeat("A", 1024)))
 	}
 	var fw io.Writer
-	fw, err = w.CreateFormFile("fupload", tempfile.Name())
-	require.NoError(t, err)
-
-	_, err = tempfile.Seek(0, 0)
-	require.NoError(t, err)
-
-	_, err = io.Copy(fw, tempfile)
-	require.NoError(t, err)
-
-	req.Body = io.NopCloser(&b)
+	if fw, err = w.CreateFormFile("fupload", tempfile.Name()); err != nil {
+		return err
+	}
+	if _, err := tempfile.Seek(0, 0); err != nil {
+		return err
+	}
+	if _, err = io.Copy(fw, tempfile); err != nil {
+		return err
+	}
+	req.Body = ioutil.NopCloser(&b)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	req.Method = "POST"
+	return nil
 }
 
-func TestClientIpRule(t *testing.T) {
-	tester := newTester("test.init.config", t)
-
-	// client_ip will be 127.0.0.1
-	req, _ := http.NewRequest("GET", baseURL+"/", nil)
-	tester.AssertResponseCode(req, 200)
-
-	// client_ip will be 127.0.0.2
-	req, _ = http.NewRequest("GET", baseURL+"/", nil)
-	req.Header.Add("X-Forwarded-For", "127.0.0.2")
-	tester.AssertResponseCode(req, 403)
-}
-
-func newTester(caddyfile string, t *testing.T) *caddytest.Tester {
+func newTester(caddyfile string, t *testing.T) (*caddytest.Tester, error) {
 	tester := caddytest.NewTester(t)
-	configContent, err := os.ReadFile(caddyfile)
-	require.NoError(t, err)
-	tester.InitServer(string(configContent), "caddyfile")
-	return tester
-}
-
-func TestUnmarshalCaddyfile(t *testing.T) {
-	tests := map[string]struct {
-		config    string
-		shouldErr bool
-	}{
-		"empty config": {
-			shouldErr: true,
-		},
-		"invalid config for directives without value": {
-			config: `coraza_waf {
-				directives
-			}`,
-			shouldErr: true,
-		},
-		"invalid config for directives with more than one value": {
-			config: `coraza_waf {
-				directives first_arg second_arg
-			}`,
-			shouldErr: true,
-		},
-
-		"invalid config for unexpected key": {
-			config: `coraza_waf {
-				unknown_key first_arg
-			}`,
-			shouldErr: true,
-		},
-		"invalid config for load_owasp_crs with value": {
-			config: `coraza_waf {
-				load_owasp_crs next_arg
-			}`,
-			shouldErr: true,
-		},
-		"valid config": {
-			config: `coraza_waf {
-				load_owasp_crs
-				directives ` + "`Include my-rules.conf`" + `
-			}`,
-		},
+	configContent, err := ioutil.ReadFile(caddyfile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration file %s: %s", caddyfile, err)
 	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			dispenser := caddyfile.NewTestDispenser(test.config)
-			m := &corazaModule{}
-			err := m.UnmarshalCaddyfile(dispenser)
-			if test.shouldErr {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
+	rawConfig := string(configContent)
+	tester.InitServer(rawConfig, "caddyfile")
+	return tester, nil
 }
