@@ -93,6 +93,10 @@ func (m *corazaModule) Validate() error {
 func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	var err error
 	id := randomString(16)
+
+	// Create a logger with the hostname for this request
+	reqLogger := m.logger.With(zap.String("host", r.Host))
+
 	tx := m.waf.NewTransactionWithID(id)
 	defer func() {
 		tx.ProcessLogging()
@@ -101,11 +105,10 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 	repl.Set("http.transaction_id", id)
 
-	// Add hostname to logger
-	m.logger = m.logger.With(zap.String("hostname", r.Host))
-
+	// Use the request-specific logger
 	it, err := processRequest(tx, r)
 	if err != nil {
+		reqLogger.Error("Error processing request", zap.Error(err))
 		return err
 	}
 	if it != nil {
