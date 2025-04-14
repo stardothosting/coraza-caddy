@@ -1,18 +1,24 @@
-// Copyright 2023 The OWASP Coraza contributors
-// SPDX-License-Identifier: Apache-2.0
+// Copyright 2023 Juan Pablo Tosso and the OWASP Coraza contributors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package coraza
 
 import (
 	"math/rand"
-	"net"
-	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 )
 
 const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -49,34 +55,4 @@ func randomString(n int) string {
 	mu.Unlock()
 
 	return sb.String()
-}
-
-func getClientAddress(req *http.Request) (string, int) {
-
-	var (
-		clientIp   string
-		clientPort int
-	)
-
-	if address, ok := caddyhttp.GetVar(req.Context(), caddyhttp.ClientIPVarKey).(string); ok && len(address) > 0 {
-		ip, port, _ := net.SplitHostPort(address)
-		if ip != "" {
-			clientIp = ip
-		} else {
-			clientIp = address
-		}
-		clientPort, _ = strconv.Atoi(port)
-	} else {
-		idx := strings.LastIndexByte(req.RemoteAddr, ':')
-		if idx != -1 {
-			clientIp = req.RemoteAddr[:idx]
-			clientPort, _ = strconv.Atoi(req.RemoteAddr[idx+1:])
-		} else {
-			clientIp = req.RemoteAddr
-			clientPort = 0
-		}
-	}
-
-	return clientIp, clientPort
-
 }
