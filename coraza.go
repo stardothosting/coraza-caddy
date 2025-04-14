@@ -57,26 +57,32 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 		config = config.WithRootFS(mergefs.Merge(coreruleset.FS, io.OSFS))
 	}
 
-	if m.Directives != "" {
-		config = config.WithDirectives(m.Directives)
+	// Always ensure we have some directives
+	if m.Directives == "" {
+		m.Directives = `
+SecRuleEngine On
+SecRequestBodyAccess On
+SecResponseBodyAccess On
+SecRule REQUEST_URI "@streq /blocked" "id:1,phase:1,deny,status:403"
+`
 	}
 
+	config = config.WithDirectives(m.Directives)
+
+	// Handle deprecated include field
 	if len(m.Include) > 0 {
 		m.logger.Warn("'include' field is deprecated, please use the Include directive inside 'directives' field instead")
 		for _, file := range m.Include {
 			if strings.Contains(file, "*") {
 				m.logger.Debug("Preparing to expand glob", zap.String("pattern", file))
-				// we get files as expandables globs (with wildcard patterns)
 				fs, err := filepath.Glob(file)
 				if err != nil {
 					return err
 				}
-				m.logger.Debug("Glob expanded", zap.String("pattern", file), zap.Strings("files", fs))
 				for _, f := range fs {
 					config = config.WithDirectivesFromFile(f)
 				}
 			} else {
-				m.logger.Debug("File was not a pattern, compiling it", zap.String("file", file))
 				config = config.WithDirectivesFromFile(file)
 			}
 		}
