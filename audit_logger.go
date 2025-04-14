@@ -1,7 +1,7 @@
 package coraza
 
 import (
-	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/types"
 	"go.uber.org/zap"
 )
 
@@ -15,9 +15,9 @@ func NewAuditLogger(l *zap.Logger) *AuditLogger {
 	}
 }
 
-func (l *AuditLogger) LogTransaction(tx coraza.Transaction) {
+func (l *AuditLogger) LogTransaction(tx types.Transaction) {
 	logEntry := map[string]interface{}{
-		"hostname": tx.GetCollection(coraza.RequestHeaders).Get("Host"),
+		"hostname": tx.GetCollection(types.RequestHeaders).Get("Host"),
 	}
 
 	// Log using structured logging
