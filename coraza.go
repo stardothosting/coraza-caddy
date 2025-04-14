@@ -16,8 +16,10 @@ package coraza
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/caddyserver/caddy/v2"
@@ -26,7 +28,6 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/types"
-	corazatypes "github.com/corazawaf/coraza/v3/types"
 	"go.uber.org/zap"
 )
 
@@ -91,7 +92,6 @@ func (m *corazaModule) Validate() error {
 
 // ServeHTTP implements caddyhttp.MiddlewareHandler.
 func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	var err error
 	id := randomString(16)
 	tx := m.waf.NewTransaction()
 
@@ -108,9 +108,11 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 	repl.Set("http.transaction_id", id)
 
-	if it, err := processRequest(tx, r); err != nil {
+	if err := processRequest(tx, r); err != nil {
 		return err
-	} else if it != nil {
+	}
+
+	if tx.IsInterrupted() {
 		return caddyhttp.Error(http.StatusForbidden, nil)
 	}
 
@@ -151,7 +153,7 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 
 func logger(logger *zap.Logger) func(types.MatchedRule) {
 	return func(mr types.MatchedRule) {
-		data := mr.ErrorLog(403)
+		data := mr.Message()
 
 		switch mr.Rule().Severity() {
 		case types.RuleSeverityEmergency:
@@ -174,23 +176,33 @@ func logger(logger *zap.Logger) func(types.MatchedRule) {
 	}
 }
 
-func interrupt(err error, tx types.Transaction, id string) error {
-	if !tx.IsInterrupted() {
-		return caddyhttp.HandlerError{
-			StatusCode: 500,
-			ID:         id,
-			Err:        err,
-		}
+func processRequest(tx types.Transaction, r *http.Request) error {
+	// Get client IP and port
+	clientIP, clientPort := splitHostPort(r.RemoteAddr)
+	serverIP, serverPort := splitHostPort(r.Host)
+
+	// Process request
+	tx.ProcessConnection(clientIP, clientPort, serverIP, serverPort)
+	tx.ProcessURI(r.URL.String(), r.Method, r.Proto)
+
+	for k, v := range r.Header {
+		tx.AddRequestHeader(k, v[0])
 	}
-	status := tx.Interruption().Status
-	if status <= 0 {
-		status = 403
+
+	return tx.ProcessRequestHeaders()
+}
+
+// Helper function to split host:port
+func splitHostPort(hostport string) (string, int) {
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		return hostport, 0
 	}
-	return caddyhttp.HandlerError{
-		StatusCode: status,
-		ID:         id,
-		Err:        err,
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		return host, 0
 	}
+	return host, portNum
 }
 
 // Interface guards
@@ -200,15 +212,3 @@ var (
 	_ caddyhttp.MiddlewareHandler = (*corazaModule)(nil)
 	_ caddyfile.Unmarshaler       = (*corazaModule)(nil)
 )
-
-func processRequest(tx corazatypes.Transaction, r *http.Request) (corazatypes.Interruption, error) {
-	// Process request
-	tx.ProcessConnection(r.RemoteAddr, r.Host, r.TLS != nil)
-	tx.ProcessURI(r.URL.String(), r.Method, r.Proto)
-
-	for k, v := range r.Header {
-		tx.AddRequestHeader(k, v[0])
-	}
-
-	return tx.ProcessRequest()
-}
