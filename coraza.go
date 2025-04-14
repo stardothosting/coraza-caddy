@@ -99,8 +99,8 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 
 	tx := m.waf.NewTransactionWithID(id)
 
-	// Just try setting a static hostname first
-	tx.Variables().Set("HOSTNAME", "test.example.com")
+	// Set hostname directly in the transaction
+	tx.SetVariable("HOSTNAME", []string{"test.example.com"})
 
 	defer func() {
 		tx.ProcessLogging()
