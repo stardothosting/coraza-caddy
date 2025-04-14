@@ -56,7 +56,7 @@ func (corazaModule) CaddyModule() caddy.ModuleInfo {
 // Provision implements caddy.Provisioner.
 func (m *corazaModule) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger()
-	config := coraza.NewWAFConfig().WithDefaultActionsDisabled()
+	config := coraza.NewWAFConfig()
 	if m.Directives != "" {
 		config = config.WithDirectives(m.Directives)
 	}
