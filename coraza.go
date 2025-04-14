@@ -110,8 +110,6 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 
 	// Early return, Coraza is not going to process any rule
 	if tx.IsRuleEngineOff() {
-		// response writer is not going to be wrapped, but used as-is
-		// to generate the response
 		return next.ServeHTTP(w, r)
 	}
 
