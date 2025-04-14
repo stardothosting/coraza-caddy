@@ -25,6 +25,8 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/types"
+	corazatypes "github.com/corazawaf/coraza/v3/types"
 	"go.uber.org/zap"
 )
 
@@ -38,7 +40,7 @@ type corazaModule struct {
 	Include    []string `json:"include"`
 	Directives string   `json:"directives"`
 
-	waf    *coraza.WAF
+	waf    coraza.WAF
 	logger *zap.Logger
 }
 
@@ -52,8 +54,8 @@ func (corazaModule) CaddyModule() caddy.ModuleInfo {
 
 // Provision implements caddy.Provisioner.
 func (m *corazaModule) Provision(ctx caddy.Context) error {
-	m.logger = ctx.Logger(m)
-	config := types.NewWAFConfig().WithErrorCallback(logger(m.logger))
+	m.logger = ctx.Logger()
+	config := coraza.NewWAFConfig()
 	if m.Directives != "" {
 		config = config.WithDirectives(m.Directives)
 	}
@@ -78,7 +80,7 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 		}
 	}
 	var err error
-	m.waf, err = types.NewWAF(config)
+	m.waf, err = coraza.NewWAF(config)
 	return err
 }
 
@@ -91,7 +93,7 @@ func (m *corazaModule) Validate() error {
 func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	var err error
 	id := randomString(16)
-	tx := m.waf.NewTransactionWithID(id)
+	tx := m.waf.NewTransaction()
 
 	// Simple test log
 	m.logger.Error("WAF request",
@@ -106,8 +108,10 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 	repl.Set("http.transaction_id", id)
 
-	if err = processRequest(tx, r); err != nil {
+	if it, err := processRequest(tx, r); err != nil {
 		return err
+	} else if it != nil {
+		return caddyhttp.Error(http.StatusForbidden, nil)
 	}
 
 	return next.ServeHTTP(w, r)
@@ -197,6 +201,14 @@ var (
 	_ caddyfile.Unmarshaler       = (*corazaModule)(nil)
 )
 
-func processRequest(tx types.Transaction, r *http.Request) (types.Interruption, error) {
-	// ... rest of the function ...
+func processRequest(tx corazatypes.Transaction, r *http.Request) (corazatypes.Interruption, error) {
+	// Process request
+	tx.ProcessConnection(r.RemoteAddr, r.Host, r.TLS != nil)
+	tx.ProcessURI(r.URL.String(), r.Method, r.Proto)
+
+	for k, v := range r.Header {
+		tx.AddRequestHeader(k, v[0])
+	}
+
+	return tx.ProcessRequest()
 }
