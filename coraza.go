@@ -104,7 +104,7 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	}()
 
 	// Add the hostname to the transaction variables
-	if err := tx.GetVariables().Set("SERVER_HOSTNAME", r.Host); err != nil {
+	if err := tx.Variables().Set("SERVER_HOSTNAME", r.Host); err != nil {
 		m.logger.Error("failed to set SERVER_HOSTNAME", zap.Error(err))
 	}
 
