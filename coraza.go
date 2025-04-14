@@ -25,8 +25,7 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"github.com/corazawaf/coraza/v3"
-	corazatypes "github.com/corazawaf/coraza/v3/types"
+	"github.com/corazawaf/coraza/v3/types"
 	"go.uber.org/zap"
 )
 
@@ -41,7 +40,7 @@ type corazaModule struct {
 	Directives string   `json:"directives"`
 
 	logger *zap.Logger
-	waf    coraza.WAF
+	waf    types.WAF
 }
 
 // CaddyModule returns the Caddy module information.
@@ -55,7 +54,7 @@ func (corazaModule) CaddyModule() caddy.ModuleInfo {
 // Provision implements caddy.Provisioner.
 func (m *corazaModule) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger(m)
-	config := coraza.NewWAFConfig().WithErrorCallback(logger(m.logger))
+	config := types.NewWAFConfig().WithErrorCallback(logger(m.logger))
 	if m.Directives != "" {
 		config = config.WithDirectives(m.Directives)
 	}
@@ -80,7 +79,7 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 		}
 	}
 	var err error
-	m.waf, err = coraza.NewWAF(config)
+	m.waf, err = types.NewWAF(config)
 	return err
 }
 
@@ -171,32 +170,32 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 	return m, err
 }
 
-func logger(logger *zap.Logger) func(corazatypes.MatchedRule) {
-	return func(mr corazatypes.MatchedRule) {
+func logger(logger *zap.Logger) func(types.MatchedRule) {
+	return func(mr types.MatchedRule) {
 		data := mr.ErrorLog(403)
 
 		switch mr.Rule().Severity() {
-		case corazatypes.RuleSeverityEmergency:
+		case types.RuleSeverityEmergency:
 			logger.Error(data)
-		case corazatypes.RuleSeverityAlert:
+		case types.RuleSeverityAlert:
 			logger.Error(data)
-		case corazatypes.RuleSeverityCritical:
+		case types.RuleSeverityCritical:
 			logger.Error(data)
-		case corazatypes.RuleSeverityError:
+		case types.RuleSeverityError:
 			logger.Error(data)
-		case corazatypes.RuleSeverityWarning:
+		case types.RuleSeverityWarning:
 			logger.Warn(data)
-		case corazatypes.RuleSeverityNotice:
+		case types.RuleSeverityNotice:
 			logger.Info(data)
-		case corazatypes.RuleSeverityInfo:
+		case types.RuleSeverityInfo:
 			logger.Info(data)
-		case corazatypes.RuleSeverityDebug:
+		case types.RuleSeverityDebug:
 			logger.Debug(data)
 		}
 	}
 }
 
-func interrupt(err error, tx coraza.Transaction, id string) error {
+func interrupt(err error, tx types.Transaction, id string) error {
 	if !tx.IsInterrupted() {
 		return caddyhttp.HandlerError{
 			StatusCode: 500,
@@ -222,3 +221,7 @@ var (
 	_ caddyhttp.MiddlewareHandler = (*corazaModule)(nil)
 	_ caddyfile.Unmarshaler       = (*corazaModule)(nil)
 )
+
+func processRequest(tx types.Transaction, r *http.Request) (types.Interruption, error) {
+	// ... rest of the function ...
+}
