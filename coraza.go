@@ -170,23 +170,34 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 func logger(logger *zap.Logger) func(types.MatchedRule) {
 	return func(mr types.MatchedRule) {
 		data := mr.ErrorLog(403)
+
+		// Get hostname from transaction
+		tx := mr.Transaction()
+		hostname := ""
+		if tx != nil {
+			hostname = tx.Variables().Get("REQUEST_HEADERS.Host").String()
+		}
+
+		// Create logger with hostname field
+		loggerWithHost := logger.With(zap.String("hostname", hostname))
+
 		switch mr.Rule().Severity() {
 		case types.RuleSeverityEmergency:
-			logger.Error(data)
+			loggerWithHost.Error(data)
 		case types.RuleSeverityAlert:
-			logger.Error(data)
+			loggerWithHost.Error(data)
 		case types.RuleSeverityCritical:
-			logger.Error(data)
+			loggerWithHost.Error(data)
 		case types.RuleSeverityError:
-			logger.Error(data)
+			loggerWithHost.Error(data)
 		case types.RuleSeverityWarning:
-			logger.Warn(data)
+			loggerWithHost.Warn(data)
 		case types.RuleSeverityNotice:
-			logger.Info(data)
+			loggerWithHost.Info(data)
 		case types.RuleSeverityInfo:
-			logger.Info(data)
+			loggerWithHost.Info(data)
 		case types.RuleSeverityDebug:
-			logger.Debug(data)
+			loggerWithHost.Debug(data)
 		}
 	}
 }
