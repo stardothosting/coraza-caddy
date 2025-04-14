@@ -103,6 +103,11 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		_ = tx.Close()
 	}()
 
+	// Add the hostname to the transaction variables
+	if err := tx.Variables().Set("SERVER_HOSTNAME", r.Host); err != nil {
+		m.logger.Error("failed to set SERVER_HOSTNAME", zap.Error(err))
+	}
+
 	// Early return, Coraza is not going to process any rule
 	if tx.IsRuleEngineOff() {
 		// response writer is not going to be wrapped, but used as-is
