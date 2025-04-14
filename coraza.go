@@ -174,32 +174,23 @@ func logger(logger *zap.Logger) func(types.MatchedRule) {
 	return func(mr types.MatchedRule) {
 		data := mr.ErrorLog(403)
 
-		// Get hostname from the rule message context
-		hostname := ""
-		if hostVar := mr.Rule().Variables().Get("REQUEST_HEADERS.Host"); hostVar != nil {
-			hostname = hostVar.String()
-		}
-
-		// Create logger with hostname field
-		loggerWithHost := logger.With(zap.String("hostname", hostname))
-
 		switch mr.Rule().Severity() {
 		case types.RuleSeverityEmergency:
-			loggerWithHost.Error(data)
+			logger.Error(data)
 		case types.RuleSeverityAlert:
-			loggerWithHost.Error(data)
+			logger.Error(data)
 		case types.RuleSeverityCritical:
-			loggerWithHost.Error(data)
+			logger.Error(data)
 		case types.RuleSeverityError:
-			loggerWithHost.Error(data)
+			logger.Error(data)
 		case types.RuleSeverityWarning:
-			loggerWithHost.Warn(data)
+			logger.Warn(data)
 		case types.RuleSeverityNotice:
-			loggerWithHost.Info(data)
+			logger.Info(data)
 		case types.RuleSeverityInfo:
-			loggerWithHost.Info(data)
+			logger.Info(data)
 		case types.RuleSeverityDebug:
-			loggerWithHost.Debug(data)
+			logger.Debug(data)
 		}
 	}
 }
