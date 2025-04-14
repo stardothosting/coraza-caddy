@@ -108,12 +108,8 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 	repl.Set("http.transaction_id", id)
 
-	if err := processRequest(tx, r); err != nil {
-		return err
-	}
-
-	if tx.IsInterrupted() {
-		return caddyhttp.Error(http.StatusForbidden, nil)
+	if interruption := processRequest(tx, r); interruption != nil {
+		return caddyhttp.Error(http.StatusForbidden, fmt.Errorf("request blocked by WAF"))
 	}
 
 	return next.ServeHTTP(w, r)
@@ -189,7 +185,10 @@ func processRequest(tx types.Transaction, r *http.Request) error {
 		tx.AddRequestHeader(k, v[0])
 	}
 
-	return tx.ProcessRequestHeaders()
+	if interruption := tx.ProcessRequestHeaders(); interruption != nil {
+		return fmt.Errorf("request blocked by WAF")
+	}
+	return nil
 }
 
 // Helper function to split host:port
