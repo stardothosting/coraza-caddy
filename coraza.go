@@ -95,10 +95,8 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 
-	// Just log what version we're using
-	m.logger.Info("Coraza version info",
-		zap.String("host", r.Host),
-		zap.String("tx_type", fmt.Sprintf("%T", tx)))
+	// Try using SetVariable directly
+	tx.SetVariable("SERVER_NAME", []string{r.Host})
 
 	defer func() {
 		tx.ProcessLogging()
