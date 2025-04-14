@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/types"
 )
 
