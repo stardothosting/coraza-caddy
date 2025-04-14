@@ -55,7 +55,8 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 
 	config := coraza.NewWAFConfig().
 		WithErrorCallback(newErrorCb(m.logger)).
-		WithDebugLogger(newLogger(m.logger))
+		WithDebugLogger(newLogger(m.logger)).
+		WithDirectives("SecRuleEngine Off") // Disable rule engine first
 
 	if m.LoadOWASPCRS {
 		config = config.WithRootFS(mergefs.Merge(coreruleset.FS, io.OSFS))
@@ -70,7 +71,6 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 		for _, file := range m.Include {
 			if strings.Contains(file, "*") {
 				m.logger.Debug("Preparing to expand glob", zap.String("pattern", file))
-				// we get files as expandables globs (with wildcard patterns)
 				fs, err := filepath.Glob(file)
 				if err != nil {
 					return err
@@ -85,9 +85,6 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 			}
 		}
 	}
-
-	// Disable default actions before loading rules
-	config.SetRuleEngine(false)
 
 	var err error
 	m.waf, err = coraza.NewWAF(config)
