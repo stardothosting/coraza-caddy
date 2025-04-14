@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/debuglog"
-	"github.com/corazawaf/coraza/v3/types"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -181,9 +181,9 @@ func (e noopEvent) Uint(string, uint) debuglog.Event             { return e }
 func (e noopEvent) Stringer(string, fmt.Stringer) debuglog.Event { return e }
 func (e noopEvent) IsEnabled() bool                              { return false }
 
-func (l *logger) LogTransaction(tx types.Transaction) {
+func (l *logger) LogTransaction(tx coraza.Transaction) {
 	logEntry := map[string]interface{}{
-		"hostname": tx.RequestHeaders().Get("Host"),
+		"hostname": tx.GetCollection(coraza.RequestHeaders).Get("Host"),
 	}
 	if err := l.WriteAuditLog(logEntry); err != nil {
 		l.Logger.Error("failed to write audit log", zap.Error(err))
