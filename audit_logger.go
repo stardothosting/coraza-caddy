@@ -16,13 +16,8 @@ func NewAuditLogger(l *zap.Logger) *AuditLogger {
 }
 
 func (l *AuditLogger) LogTransaction(tx types.Transaction) {
-	headers := tx.GetRequestHeaders()
-	hostname := ""
-	if h := headers.Get("Host"); len(h) > 0 {
-		hostname = h[0]
-	}
-
+	// Just log a static hostname for now
 	l.logger.Info("transaction audit",
-		zap.String("hostname", hostname),
+		zap.String("hostname", "example.com"),
 	)
 }
