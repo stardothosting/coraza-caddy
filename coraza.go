@@ -95,8 +95,8 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 
-	// Just set a static test value
-	tx.AddArgument("server-name", "SERVER_NAME", "test.hostname.com")
+	// Use numeric constant 11 for SERVER_NAME
+	tx.AddArgument(11, "SERVER_NAME", "test.hostname.com")
 
 	defer func() {
 		tx.ProcessLogging()
