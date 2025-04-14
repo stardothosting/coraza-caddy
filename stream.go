@@ -94,3 +94,31 @@ func newStreamRecorder(w http.ResponseWriter, tx types.Transaction) *streamRecor
 		transaction:           tx,
 	}
 }
+
+type streamReader struct {
+	transaction types.Transaction
+	reader      io.Reader
+}
+
+func (sr *streamReader) Read(p []byte) (n int, err error) {
+	n, err = sr.reader.Read(p)
+	if n > 0 {
+		// Process the request body chunk
+		if it := sr.transaction.RequestBodyBuffer(p[:n]); it != nil {
+			return 0, io.EOF
+		}
+	}
+	return
+}
+
+type streamWriter struct {
+	transaction types.Transaction
+	writer      io.Writer
+}
+
+func (sw *streamWriter) Write(p []byte) (n int, err error) {
+	if it := sw.transaction.ResponseBodyBuffer(p); it != nil {
+		return 0, io.EOF
+	}
+	return sw.writer.Write(p)
+}
