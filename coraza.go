@@ -26,7 +26,7 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/corazawaf/coraza/v3"
-	"github.com/corazawaf/coraza/v3/types"
+	corazatypes "github.com/corazawaf/coraza/v3/types"
 	"go.uber.org/zap"
 )
 
@@ -95,8 +95,8 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 
-	// Use numeric constant 11 for SERVER_NAME
-	tx.AddArgument(11, "SERVER_NAME", "test.hostname.com")
+	// Use the actual constant from Coraza types
+	tx.AddArgument(corazatypes.ServerName, "SERVER_NAME", r.Host)
 
 	defer func() {
 		tx.ProcessLogging()
@@ -171,32 +171,32 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 	return m, err
 }
 
-func logger(logger *zap.Logger) func(types.MatchedRule) {
-	return func(mr types.MatchedRule) {
+func logger(logger *zap.Logger) func(corazatypes.MatchedRule) {
+	return func(mr corazatypes.MatchedRule) {
 		data := mr.ErrorLog(403)
 
 		switch mr.Rule().Severity() {
-		case types.RuleSeverityEmergency:
+		case corazatypes.RuleSeverityEmergency:
 			logger.Error(data)
-		case types.RuleSeverityAlert:
+		case corazatypes.RuleSeverityAlert:
 			logger.Error(data)
-		case types.RuleSeverityCritical:
+		case corazatypes.RuleSeverityCritical:
 			logger.Error(data)
-		case types.RuleSeverityError:
+		case corazatypes.RuleSeverityError:
 			logger.Error(data)
-		case types.RuleSeverityWarning:
+		case corazatypes.RuleSeverityWarning:
 			logger.Warn(data)
-		case types.RuleSeverityNotice:
+		case corazatypes.RuleSeverityNotice:
 			logger.Info(data)
-		case types.RuleSeverityInfo:
+		case corazatypes.RuleSeverityInfo:
 			logger.Info(data)
-		case types.RuleSeverityDebug:
+		case corazatypes.RuleSeverityDebug:
 			logger.Debug(data)
 		}
 	}
 }
 
-func interrupt(err error, tx types.Transaction, id string) error {
+func interrupt(err error, tx coraza.Transaction, id string) error {
 	if !tx.IsInterrupted() {
 		return caddyhttp.HandlerError{
 			StatusCode: 500,
