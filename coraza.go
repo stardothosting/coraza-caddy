@@ -94,8 +94,11 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 
-	// Try using the variable ID directly
-	tx.AddArgument(11, "SERVER_NAME", r.Host)
+	// Just log something for testing
+	m.logger.Error("WAF TEST",
+		zap.String("test_hostname", "test.example.com"),
+		zap.String("request_id", id),
+	)
 
 	defer func() {
 		tx.ProcessLogging()
