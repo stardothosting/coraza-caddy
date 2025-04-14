@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/types"
+	corazaTypes "github.com/corazawaf/coraza/v3/types"
 )
 
 // Copied from https://github.com/corazawaf/coraza/blob/main/http/middleware.go
@@ -110,7 +110,7 @@ func parseServerName(host string) string {
 }
 
 type Module struct {
-	waf *coraza.Waf
+	waf corazaTypes.WAF
 }
 
 func (m *Module) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
@@ -127,7 +127,7 @@ func (m *Module) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 	}()
 
 	// Add hostname to transaction variables
-	tx.AddGetRequestHeader("Host", hostname)
+	tx.AddRequestHeader("Host", hostname)
 
 	return next.ServeHTTP(w, r)
 }
