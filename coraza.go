@@ -171,11 +171,10 @@ func logger(logger *zap.Logger) func(types.MatchedRule) {
 	return func(mr types.MatchedRule) {
 		data := mr.ErrorLog(403)
 
-		// Get hostname from transaction
-		tx := mr.Transaction()
+		// Get hostname from the rule message context
 		hostname := ""
-		if tx != nil {
-			hostname = tx.Variables().Get("REQUEST_HEADERS.Host").String()
+		if hostVar := mr.Rule().Variables().Get("REQUEST_HEADERS.Host"); hostVar != nil {
+			hostname = hostVar.String()
 		}
 
 		// Create logger with hostname field
