@@ -16,8 +16,9 @@ func NewAuditLogger(l *zap.Logger) *AuditLogger {
 }
 
 func (l *AuditLogger) LogTransaction(tx types.Transaction) {
+	headers := tx.Variables().RequestHeaders()
 	logEntry := map[string]interface{}{
-		"hostname": tx.GetCollection(types.RequestHeaders).Get("Host"),
+		"hostname": headers.Get("Host"),
 	}
 
 	// Log using structured logging
