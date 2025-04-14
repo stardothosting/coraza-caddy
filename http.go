@@ -122,7 +122,7 @@ func (m *Module) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 	tx := m.waf.NewTransaction()
 	defer func() {
 		tx.ProcessLogging()
-		tx.Clean()
+		tx.Close()
 	}()
 
 	tx.AddRequestHeader("Host", hostname)
