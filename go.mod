@@ -1,4 +1,4 @@
-module github.com/corazawaf/coraza-caddy/v2
+module github.com/stardothosting/coraza-caddy
 
 go 1.21
 
