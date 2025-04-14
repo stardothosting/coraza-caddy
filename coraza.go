@@ -86,7 +86,7 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 	}
 
 	// Disable default actions before loading rules
-	config.SetDefaultActionsRuleEngine(false)
+	config.SetRuleEngine(false)
 
 	var err error
 	m.waf, err = coraza.NewWAF(config)
