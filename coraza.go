@@ -99,14 +99,15 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 	defer func() {
+		if tx.IsInterrupted() {
+			m.logger = m.logger.With(zap.String("host", r.Host))
+		}
 		tx.ProcessLogging()
 		_ = tx.Close()
 	}()
 
 	// Early return, Coraza is not going to process any rule
 	if tx.IsRuleEngineOff() {
-		// response writer is not going to be wrapped, but used as-is
-		// to generate the response
 		return next.ServeHTTP(w, r)
 	}
 
