@@ -16,7 +16,6 @@ package coraza
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -25,7 +24,7 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"github.com/corazawaf/coraza/v3/types"
+	"github.com/corazawaf/coraza/v3"
 	"go.uber.org/zap"
 )
 
@@ -39,8 +38,8 @@ type corazaModule struct {
 	Include    []string `json:"include"`
 	Directives string   `json:"directives"`
 
+	waf    *coraza.WAF
 	logger *zap.Logger
-	waf    types.WAF
 }
 
 // CaddyModule returns the Caddy module information.
@@ -94,51 +93,24 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 
-	// Just log something for testing
-	m.logger.Error("WAF TEST",
-		zap.String("test_hostname", "test.example.com"),
-		zap.String("request_id", id),
-	)
+	// Simple test log
+	m.logger.Error("WAF request",
+		zap.String("hostname", r.Host),
+		zap.String("id", id))
 
 	defer func() {
 		tx.ProcessLogging()
 		_ = tx.Close()
 	}()
+
 	repl := r.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer)
 	repl.Set("http.transaction_id", id)
 
-	it, err := processRequest(tx, r)
-	if err != nil {
+	if err = processRequest(tx, r); err != nil {
 		return err
-	}
-	if it != nil {
-		return interrupt(nil, tx, id)
 	}
 
-	rec := newStreamRecorder(w, tx)
-	err = next.ServeHTTP(rec, r)
-	if err != nil {
-		return err
-	}
-	// If the response was interrupted during phase 3 or 4 we can stop the response
-	if tx.IsInterrupted() {
-		return interrupt(nil, tx, id)
-	}
-	if !rec.Buffered() {
-		//Nothing to do, response was already sent to the client
-		return nil
-	}
-
-	if status := rec.Status(); status > 0 {
-		w.WriteHeader(status)
-	}
-	// We will send the response provided by Coraza
-	reader, err := rec.Reader()
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(w, reader)
-	return err
+	return next.ServeHTTP(w, r)
 }
 
 // Unmarshal Caddyfile implements caddyfile.Unmarshaler.
