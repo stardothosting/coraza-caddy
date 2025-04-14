@@ -99,7 +99,9 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 			})
 		}
 	} else {
-		m.newTx = m.waf.NewTransaction
+		m.newTx = func(r *http.Request) types.Transaction {
+			return m.waf.NewTransaction()
+		}
 	}
 
 	return nil
