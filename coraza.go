@@ -148,6 +148,17 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 			ruleFile = rule.Rule().File()
 		}
 
+		// Provide defaults if values are empty
+		if ruleID == "" || ruleID == "0" {
+			ruleID = "unknown"
+		}
+		if ruleFile == "" {
+			ruleFile = "unknown"
+		}
+		if uniqueID == "" {
+			uniqueID = tx.ID() // Use transaction ID as fallback
+		}
+
 		m.logger.Error("WAF rule violation detected",
 			zap.String("hostname", r.Host),
 			zap.String("uri", r.RequestURI),
@@ -220,7 +231,6 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 	err := m.UnmarshalCaddyfile(h.Dispenser)
 	return m, err
 }
-
 
 // Interface guards
 var (
