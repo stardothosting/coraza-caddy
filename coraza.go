@@ -136,12 +136,14 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		// Extract rule information from matched rules
 		m.logger.Error("DEBUG: WAF matched rules", zap.Int("matched_rules_count", len(matchedRules)))
 
-		// Extract rule information from the last matched rule (like the old working version)
+		// Extract rule information from the last non-inline rule
 		var blockingRule types.MatchedRule
 		for _, rule := range matchedRules {
-			// Always capture the last rule's ID and file (same as old working version)
-			ruleID = fmt.Sprintf("%d", rule.Rule().ID())
-			ruleFile = rule.Rule().File()
+			// Skip inline rules for rule_file, but keep for fallback
+			if rule.Rule().File() != "_inline_" {
+				ruleID = fmt.Sprintf("%d", rule.Rule().ID())
+				ruleFile = rule.Rule().File()
+			}
 			blockingRule = rule
 		}
 
