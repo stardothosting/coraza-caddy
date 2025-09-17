@@ -133,11 +133,21 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		}
 
 		// Extract rule information from matched rules
+		m.logger.Debug("WAF matched rules debug", zap.Int("matched_rules_count", len(matchedRules)))
+		
 		// Find the blocking rule (usually the last one with highest severity)
 		var blockingRule types.MatchedRule
-		for _, rule := range matchedRules {
+		for i, rule := range matchedRules {
+			m.logger.Debug("WAF rule debug", 
+				zap.Int("rule_index", i),
+				zap.Int("rule_id", int(rule.Rule().ID())),
+				zap.String("rule_file", rule.Rule().File()),
+				zap.String("rule_severity", rule.Rule().Severity().String()),
+			)
+			
 			if rule.Rule().Severity() == types.RuleSeverityEmergency {
 				blockingRule = rule
+				m.logger.Debug("Found emergency rule", zap.Int("rule_id", int(rule.Rule().ID())))
 				break
 			}
 			// Keep the last rule as fallback
@@ -158,17 +168,28 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 			// Get rule ID and file from the blocking rule
 			ruleID = fmt.Sprintf("%d", blockingRule.Rule().ID())
 			ruleFile = blockingRule.Rule().File()
+			
+			m.logger.Debug("Extracted rule info", 
+				zap.String("rule_id", ruleID),
+				zap.String("rule_file", ruleFile),
+				zap.String("unique_id", uniqueID),
+			)
+		} else {
+			m.logger.Debug("No blocking rule found")
 		}
 
 		// Provide defaults if values are empty
 		if ruleID == "" || ruleID == "0" {
 			ruleID = "unknown"
+			m.logger.Debug("Using default rule_id")
 		}
 		if ruleFile == "" {
 			ruleFile = "unknown"
+			m.logger.Debug("Using default rule_file")
 		}
 		if uniqueID == "" {
 			uniqueID = tx.ID() // Use transaction ID as fallback
+			m.logger.Debug("Using transaction ID as unique_id")
 		}
 
 		m.logger.Error("WAF rule violation detected",
