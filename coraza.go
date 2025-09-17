@@ -134,8 +134,22 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		}
 
 		// Extract rule information from matched rules
-		for _, rule := range matchedRules {
+		m.logger.Info("DEBUG: Processing matched rules",
+			zap.Int("matched_rules_count", len(matchedRules)),
+		)
+		
+		for i, rule := range matchedRules {
 			meta := rule.ErrorLog()
+			currentRuleID := fmt.Sprintf("%d", rule.Rule().ID())
+			currentRuleFile := rule.Rule().File()
+			
+			m.logger.Info("DEBUG: Rule details",
+				zap.Int("rule_index", i),
+				zap.String("rule_id", currentRuleID),
+				zap.String("rule_file", currentRuleFile),
+				zap.String("meta_length", fmt.Sprintf("%d", len(meta))),
+			)
+			
 			// Look for unique_id in any rule that has it
 			if meta != "" {
 				if idx := strings.Index(meta, "[unique_id \""); idx != -1 {
@@ -146,9 +160,15 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 				}
 			}
 			// Always capture the last rule's ID and file
-			ruleID = fmt.Sprintf("%d", rule.Rule().ID())
-			ruleFile = rule.Rule().File()
+			ruleID = currentRuleID
+			ruleFile = currentRuleFile
 		}
+		
+		m.logger.Info("DEBUG: Final extracted values",
+			zap.String("final_rule_id", ruleID),
+			zap.String("final_rule_file", ruleFile),
+			zap.String("final_unique_id", uniqueID),
+		)
 
 		m.logger.Error("WAF rule violation detected",
 			zap.String("hostname", r.Host),
