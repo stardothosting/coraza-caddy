@@ -126,6 +126,13 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 				ruleFile = rule.Rule().File()
 			}
 
+			m.logger.Info("DEBUG: WAF violation details",
+				zap.Int("matched_rules_count", len(matchedRules)),
+				zap.String("rule_id_extracted", ruleID),
+				zap.String("rule_file_extracted", ruleFile),
+				zap.String("unique_id_extracted", uniqueID),
+			)
+			
 			m.logger.Error("WAF rule violation detected",
 				zap.String("hostname", r.Host),
 				zap.String("uri", r.RequestURI),
