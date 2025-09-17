@@ -16,7 +16,6 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
-	"github.com/corazawaf/coraza/v3/types"
 	"github.com/jcchavezs/mergefs"
 	"github.com/jcchavezs/mergefs/io"
 	"go.uber.org/zap"
