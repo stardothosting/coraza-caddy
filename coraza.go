@@ -51,7 +51,8 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger(m)
 
 	config := coraza.NewWAFConfig().
-		WithDebugLogger(newLogger(m.logger))
+		WithDebugLogger(newLogger(m.logger)).
+		WithErrorCallback(newErrorCb(m.logger))
 
 	if m.LoadOWASPCRS {
 		config = config.WithRootFS(mergefs.Merge(coreruleset.FS, io.OSFS))
@@ -133,12 +134,12 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		}
 
 		// Extract rule information from matched rules
-		m.logger.Debug("WAF matched rules debug", zap.Int("matched_rules_count", len(matchedRules)))
+		m.logger.Error("DEBUG: WAF matched rules", zap.Int("matched_rules_count", len(matchedRules)))
 		
 		// Find the blocking rule (usually the last one with highest severity)
 		var blockingRule types.MatchedRule
 		for i, rule := range matchedRules {
-			m.logger.Debug("WAF rule debug", 
+			m.logger.Error("DEBUG: WAF rule", 
 				zap.Int("rule_index", i),
 				zap.Int("rule_id", int(rule.Rule().ID())),
 				zap.String("rule_file", rule.Rule().File()),
@@ -147,7 +148,7 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 			
 			if rule.Rule().Severity() == types.RuleSeverityEmergency {
 				blockingRule = rule
-				m.logger.Debug("Found emergency rule", zap.Int("rule_id", int(rule.Rule().ID())))
+				m.logger.Error("DEBUG: Found emergency rule", zap.Int("rule_id", int(rule.Rule().ID())))
 				break
 			}
 			// Keep the last rule as fallback
@@ -169,7 +170,7 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 			ruleID = fmt.Sprintf("%d", blockingRule.Rule().ID())
 			ruleFile = blockingRule.Rule().File()
 			
-			m.logger.Debug("Extracted rule info", 
+			m.logger.Error("DEBUG: Extracted rule info", 
 				zap.String("rule_id", ruleID),
 				zap.String("rule_file", ruleFile),
 				zap.String("unique_id", uniqueID),
@@ -263,6 +264,30 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 	var m corazaModule
 	err := m.UnmarshalCaddyfile(h.Dispenser)
 	return m, err
+}
+
+func newErrorCb(logger *zap.Logger) func(types.MatchedRule) {
+	return func(mr types.MatchedRule) {
+		data := mr.ErrorLog()
+		switch mr.Rule().Severity() {
+		case types.RuleSeverityEmergency:
+			logger.Error(data)
+		case types.RuleSeverityAlert:
+			logger.Error(data)
+		case types.RuleSeverityCritical:
+			logger.Error(data)
+		case types.RuleSeverityError:
+			logger.Error(data)
+		case types.RuleSeverityWarning:
+			logger.Warn(data)
+		case types.RuleSeverityNotice:
+			logger.Info(data)
+		case types.RuleSeverityInfo:
+			logger.Info(data)
+		case types.RuleSeverityDebug:
+			logger.Debug(data)
+		}
+	}
 }
 
 // Interface guards
