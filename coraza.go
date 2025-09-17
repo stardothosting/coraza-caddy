@@ -51,7 +51,6 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger(m)
 
 	config := coraza.NewWAFConfig().
-		WithErrorCallback(newErrorCb(m.logger)).
 		WithDebugLogger(newLogger(m.logger))
 
 	if m.LoadOWASPCRS {
@@ -223,26 +222,6 @@ func parseCaddyfile(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error)
 	return m, err
 }
 
-func newErrorCb(logger *zap.Logger) func(types.MatchedRule) {
-	return func(mr types.MatchedRule) {
-		logMsg := mr.ErrorLog()
-		switch mr.Rule().Severity() {
-		case types.RuleSeverityEmergency,
-			types.RuleSeverityAlert,
-			types.RuleSeverityCritical,
-			types.RuleSeverityError:
-			logger.Error(logMsg)
-		case types.RuleSeverityWarning:
-			logger.Warn(logMsg)
-		case types.RuleSeverityNotice:
-			logger.Info(logMsg)
-		case types.RuleSeverityInfo:
-			logger.Info(logMsg)
-		case types.RuleSeverityDebug:
-			logger.Debug(logMsg)
-		}
-	}
-}
 
 // Interface guards
 var (
