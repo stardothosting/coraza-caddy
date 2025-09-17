@@ -135,20 +135,24 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 
 		// Extract rule information from matched rules
 		m.logger.Error("DEBUG: WAF matched rules", zap.Int("matched_rules_count", len(matchedRules)))
-		
+
 		// Find the blocking rule (usually the last one with highest severity)
 		var blockingRule types.MatchedRule
 		for i, rule := range matchedRules {
-			m.logger.Error("DEBUG: WAF rule", 
+			m.logger.Error("DEBUG: WAF rule",
 				zap.Int("rule_index", i),
 				zap.Int("rule_id", int(rule.Rule().ID())),
 				zap.String("rule_file", rule.Rule().File()),
 				zap.String("rule_severity", rule.Rule().Severity().String()),
 			)
-			
-			if rule.Rule().Severity() == types.RuleSeverityEmergency {
+
+			// Prioritize rules that actually block (not inline domain logging rules)
+			if rule.Rule().File() != "_inline_" && rule.Rule().Severity() >= types.RuleSeverityCritical {
 				blockingRule = rule
-				m.logger.Error("DEBUG: Found emergency rule", zap.Int("rule_id", int(rule.Rule().ID())))
+				m.logger.Error("DEBUG: Found blocking rule from file", 
+					zap.Int("rule_id", int(rule.Rule().ID())),
+					zap.String("rule_file", rule.Rule().File()),
+				)
 				break
 			}
 			// Keep the last rule as fallback
@@ -169,8 +173,8 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 			// Get rule ID and file from the blocking rule
 			ruleID = fmt.Sprintf("%d", blockingRule.Rule().ID())
 			ruleFile = blockingRule.Rule().File()
-			
-			m.logger.Error("DEBUG: Extracted rule info", 
+
+			m.logger.Error("DEBUG: Extracted rule info",
 				zap.String("rule_id", ruleID),
 				zap.String("rule_file", ruleFile),
 				zap.String("unique_id", uniqueID),
