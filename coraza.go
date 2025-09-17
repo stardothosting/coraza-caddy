@@ -5,6 +5,7 @@ package coraza
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -99,6 +100,41 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	id := randomString(16)
 	tx := m.waf.NewTransactionWithID(id)
 	defer func() {
+		if tx.IsInterrupted() {
+			var uniqueID, ruleID, ruleFile string
+			matchedRules := tx.MatchedRules()
+
+			clientIP := r.RemoteAddr
+			if idx := strings.Index(clientIP, ":"); idx != -1 {
+				clientIP = clientIP[:idx]
+			}
+
+			// First try to find the blocking rule
+			for _, rule := range matchedRules {
+				meta := rule.ErrorLog()
+				// Look for unique_id in any rule that has it
+				if meta != "" {
+					if idx := strings.Index(meta, "[unique_id \""); idx != -1 {
+						end := strings.Index(meta[idx:], "\"]")
+						if end != -1 {
+							uniqueID = meta[idx+12 : idx+end]
+						}
+					}
+				}
+				// Always capture the last rule's ID and file
+				ruleID = fmt.Sprintf("%d", rule.Rule().ID())
+				ruleFile = rule.Rule().File()
+			}
+
+			m.logger.Error("WAF rule violation detected",
+				zap.String("hostname", r.Host),
+				zap.String("uri", r.RequestURI),
+				zap.String("client_ip", clientIP),
+				zap.String("unique_id", uniqueID),
+				zap.String("rule_id", ruleID),
+				zap.String("rule_file", ruleFile),
+			)
+		}
 		tx.ProcessLogging()
 		_ = tx.Close()
 	}()
@@ -123,12 +159,6 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 			Err:        err,
 		}
 	} else if it != nil {
-		m.logger.Error("WAF rule violation detected",
-			zap.String("hostname", r.Host),
-			zap.String("uri", r.RequestURI),
-			zap.String("client_ip", r.RemoteAddr),
-			zap.String("unique_id", tx.ID()),
-		)
 		return caddyhttp.HandlerError{
 			StatusCode: obtainStatusCodeFromInterruptionOrDefault(it, http.StatusOK),
 			ID:         tx.ID(),
