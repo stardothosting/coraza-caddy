@@ -16,6 +16,7 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/types"
 	"github.com/jcchavezs/mergefs"
 	"github.com/jcchavezs/mergefs/io"
 	"go.uber.org/zap"
@@ -132,9 +133,20 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		}
 
 		// Extract rule information from matched rules
+		// Find the blocking rule (usually the last one with highest severity)
+		var blockingRule types.MatchedRule
 		for _, rule := range matchedRules {
-			meta := rule.ErrorLog()
-			// Look for unique_id in any rule that has it
+			if rule.Rule().Severity() == types.RuleSeverityEmergency {
+				blockingRule = rule
+				break
+			}
+			// Keep the last rule as fallback
+			blockingRule = rule
+		}
+
+		if blockingRule != nil {
+			meta := blockingRule.ErrorLog()
+			// Look for unique_id in the rule metadata
 			if meta != "" {
 				if idx := strings.Index(meta, "[unique_id \""); idx != -1 {
 					end := strings.Index(meta[idx:], "\"]")
@@ -143,9 +155,9 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 					}
 				}
 			}
-			// Always capture the last rule's ID and file
-			ruleID = fmt.Sprintf("%d", rule.Rule().ID())
-			ruleFile = rule.Rule().File()
+			// Get rule ID and file from the blocking rule
+			ruleID = fmt.Sprintf("%d", blockingRule.Rule().ID())
+			ruleFile = blockingRule.Rule().File()
 		}
 
 		// Provide defaults if values are empty
