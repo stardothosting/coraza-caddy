@@ -136,43 +136,13 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 		// Extract rule information from matched rules
 		m.logger.Error("DEBUG: WAF matched rules", zap.Int("matched_rules_count", len(matchedRules)))
 
-		// Find the blocking rule (prioritize actual WAF file rules over inline rules)
+		// Extract rule information from the last matched rule (like the old working version)
 		var blockingRule types.MatchedRule
-		var bestFileRule types.MatchedRule
-		
-		for i, rule := range matchedRules {
-			m.logger.Error("DEBUG: WAF rule",
-				zap.Int("rule_index", i),
-				zap.Int("rule_id", int(rule.Rule().ID())),
-				zap.String("rule_file", rule.Rule().File()),
-				zap.String("rule_severity", rule.Rule().Severity().String()),
-			)
-
-			// Prioritize rules from actual WAF files (not inline)
-			if rule.Rule().File() != "_inline_" && rule.Rule().Severity() >= types.RuleSeverityCritical {
-				bestFileRule = rule
-				m.logger.Error("DEBUG: Found WAF file rule", 
-					zap.Int("rule_id", int(rule.Rule().ID())),
-					zap.String("rule_file", rule.Rule().File()),
-					zap.String("rule_severity", rule.Rule().Severity().String()),
-				)
-			}
-			// Keep the last rule as fallback
+		for _, rule := range matchedRules {
+			// Always capture the last rule's ID and file (same as old working version)
+			ruleID = fmt.Sprintf("%d", rule.Rule().ID())
+			ruleFile = rule.Rule().File()
 			blockingRule = rule
-		}
-		
-		// Use the best file rule if found, otherwise use the last rule
-		if bestFileRule != nil {
-			blockingRule = bestFileRule
-			m.logger.Error("DEBUG: Using WAF file rule as blocking rule",
-				zap.Int("rule_id", int(blockingRule.Rule().ID())),
-				zap.String("rule_file", blockingRule.Rule().File()),
-			)
-		} else {
-			m.logger.Error("DEBUG: No WAF file rule found, using fallback",
-				zap.Int("rule_id", int(blockingRule.Rule().ID())),
-				zap.String("rule_file", blockingRule.Rule().File()),
-			)
 		}
 
 		if blockingRule != nil {
