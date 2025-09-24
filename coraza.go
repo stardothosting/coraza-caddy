@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/caddyserver/caddy/v2"
@@ -30,9 +30,7 @@ func init() {
 
 // ResponseOverride defines custom WAF response behavior that overrides file-based SecDefaultAction
 type ResponseOverride struct {
-	OverrideFileDefaults bool              `json:"override_file_defaults"`    // Skip file-based SecDefaultAction directives
-	DefaultActions       map[int]string    `json:"default_actions,omitempty"` // Phase -> action mapping (e.g., {1: "deny,status:404", 2: "deny,status:404"})
-	Headers              map[string]string `json:"headers,omitempty"`         // Additional response headers
+	OverrideFileDefaults bool `json:"override_file_defaults"` // Skip file-based SecDefaultAction directives
 }
 
 // corazaModule is a Web Application Firewall implementation for Caddy.
@@ -73,14 +71,6 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 		config = config.WithDirectives(processedDirectives)
 	}
 
-	// Add custom SecDefaultAction directives if response override is configured
-	if m.ResponseOverride != nil && len(m.ResponseOverride.DefaultActions) > 0 {
-		customDirectives := m.generateCustomDefaultActions()
-		if customDirectives != "" {
-			config = config.WithDirectives(customDirectives)
-		}
-	}
-
 	if len(m.Include) > 0 {
 		m.logger.Warn("'include' field is deprecated, please use the Include directive inside 'directives' field instead")
 		for _, file := range m.Include {
@@ -93,11 +83,19 @@ func (m *corazaModule) Provision(ctx caddy.Context) error {
 				}
 				m.logger.Debug("Glob expanded", zap.String("pattern", file), zap.Strings("files", fs))
 				for _, f := range fs {
-					config = config.WithDirectivesFromFile(f)
+					if newConfig, err := m.processIncludedFile(config, f); err != nil {
+						return err
+					} else {
+						config = newConfig
+					}
 				}
 			} else {
 				m.logger.Debug("File was not a pattern, compiling it", zap.String("file", file))
-				config = config.WithDirectivesFromFile(file)
+				if newConfig, err := m.processIncludedFile(config, file); err != nil {
+					return err
+				} else {
+					config = newConfig
+				}
 			}
 		}
 	}
@@ -114,15 +112,73 @@ func (m *corazaModule) Validate() error {
 
 var errInterruptionTriggered = errors.New("interruption triggered")
 
-// processDirectives filters out SecDefaultAction directives if override is enabled
+// processDirectives processes Include directives and filters SecDefaultAction from included files if override is enabled
 func (m *corazaModule) processDirectives(directives string) string {
 	if m.ResponseOverride == nil || !m.ResponseOverride.OverrideFileDefaults {
 		// No override configured, return directives as-is
 		return directives
 	}
 
-	// Filter out SecDefaultAction lines
+	// Process Include directives and filter SecDefaultAction from included files only
 	lines := strings.Split(directives, "\n")
+	var filteredLines []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		
+		// Process Include directives by reading and filtering the included files
+		if strings.HasPrefix(strings.ToLower(trimmed), "include ") {
+			includePath := strings.TrimSpace(trimmed[8:]) // Remove "Include " prefix
+			if m.logger != nil {
+				m.logger.Debug("Processing Include directive with override", zap.String("path", includePath))
+			}
+			
+			// Handle glob patterns
+			if strings.Contains(includePath, "*") {
+				files, err := filepath.Glob(includePath)
+				if err != nil {
+					if m.logger != nil {
+						m.logger.Error("Failed to expand glob pattern", zap.String("pattern", includePath), zap.Error(err))
+					}
+					// Keep the original line if glob fails
+					filteredLines = append(filteredLines, line)
+					continue
+				}
+				
+				// Process each file in the glob
+				for _, file := range files {
+					if content := m.readAndFilterIncludedFile(file); content != "" {
+						filteredLines = append(filteredLines, content)
+					}
+				}
+			} else {
+				// Single file include
+				if content := m.readAndFilterIncludedFile(includePath); content != "" {
+					filteredLines = append(filteredLines, content)
+				}
+			}
+			continue
+		}
+		
+		// Keep all other lines (including inline SecDefaultAction from WAF-as-a-Service)
+		filteredLines = append(filteredLines, line)
+	}
+
+	return strings.Join(filteredLines, "\n")
+}
+
+// readAndFilterIncludedFile reads a file and filters out SecDefaultAction directives
+func (m *corazaModule) readAndFilterIncludedFile(filename string) string {
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		if m.logger != nil {
+			m.logger.Error("Failed to read included file", zap.String("file", filename), zap.Error(err))
+		}
+		return ""
+	}
+
+	// Filter out SecDefaultAction directives from file content
+	lines := strings.Split(string(content), "\n")
 	var filteredLines []string
 
 	for _, line := range lines {
@@ -132,30 +188,51 @@ func (m *corazaModule) processDirectives(directives string) string {
 			filteredLines = append(filteredLines, line)
 		} else {
 			if m.logger != nil {
-				m.logger.Debug("Skipping file-based SecDefaultAction due to override", zap.String("line", trimmed))
+				m.logger.Debug("Skipping file-based SecDefaultAction due to override", 
+					zap.String("file", filename), 
+					zap.String("line", trimmed))
 			}
 		}
 	}
 
-	return strings.Join(filteredLines, "\n")
+	filteredContent := strings.Join(filteredLines, "\n")
+	
+	if m.logger != nil {
+		originalLines := len(strings.Split(string(content), "\n"))
+		filteredLinesCount := len(strings.Split(filteredContent, "\n"))
+		m.logger.Debug("Processed included file", 
+			zap.String("file", filename),
+			zap.Int("original_lines", originalLines),
+			zap.Int("filtered_lines", filteredLinesCount))
+	}
+	
+	return filteredContent
 }
 
-// generateCustomDefaultActions creates custom SecDefaultAction directives
-func (m *corazaModule) generateCustomDefaultActions() string {
-	if m.ResponseOverride == nil || len(m.ResponseOverride.DefaultActions) == 0 {
-		return ""
+// processIncludedFile reads and processes an included file, filtering SecDefaultAction if needed
+func (m *corazaModule) processIncludedFile(config coraza.WAFConfig, filename string) (coraza.WAFConfig, error) {
+	if m.ResponseOverride == nil || !m.ResponseOverride.OverrideFileDefaults {
+		// No override configured, use file directly
+		return config.WithDirectivesFromFile(filename), nil
 	}
 
-	var directives []string
-
-	// Generate SecDefaultAction for each configured phase
-	for phase, action := range m.ResponseOverride.DefaultActions {
-		if action != "" {
-			directives = append(directives, fmt.Sprintf("SecDefaultAction \"phase:%d,%s\"", phase, action))
-		}
+	// Read the file content
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return config, fmt.Errorf("failed to read included file %s: %w", filename, err)
 	}
 
-	return strings.Join(directives, "\n")
+	// Filter out SecDefaultAction directives
+	filteredContent := m.processDirectives(string(content))
+	
+	if m.logger != nil {
+		m.logger.Debug("Processing included file with override", 
+			zap.String("file", filename),
+			zap.Bool("filtered", filteredContent != string(content)))
+	}
+
+	// Apply the filtered directives
+	return config.WithDirectives(filteredContent), nil
 }
 
 // ServeHTTP implements caddyhttp.MiddlewareHandler.
@@ -324,37 +401,6 @@ func (m *corazaModule) parseResponseOverride(d *caddyfile.Dispenser) error {
 			return d.ArgErr()
 		}
 		m.ResponseOverride.OverrideFileDefaults = true
-
-	case "default_action":
-		if !d.NextArg() {
-			return d.ArgErr()
-		}
-		phase, err := strconv.Atoi(d.Val())
-		if err != nil {
-			return d.Errf("invalid phase number: %v", err)
-		}
-		if !d.NextArg() {
-			return d.ArgErr()
-		}
-		action := d.Val()
-
-		if m.ResponseOverride.DefaultActions == nil {
-			m.ResponseOverride.DefaultActions = make(map[int]string)
-		}
-		m.ResponseOverride.DefaultActions[phase] = action
-
-	case "headers":
-		if m.ResponseOverride.Headers == nil {
-			m.ResponseOverride.Headers = make(map[string]string)
-		}
-		for d.NextBlock(2) {
-			headerName := d.Val()
-			if !d.NextArg() {
-				return d.Errf("header %s requires a value", headerName)
-			}
-			headerValue := d.Val()
-			m.ResponseOverride.Headers[headerName] = headerValue
-		}
 
 	default:
 		return d.Errf("unknown response override key: %s", key)
