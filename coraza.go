@@ -209,6 +209,27 @@ func (m *corazaModule) readAndFilterIncludedFile(filename string) string {
 	return filteredContent
 }
 
+// filterSecDefaultActionFromFileContent filters SecDefaultAction from raw file content
+func (m *corazaModule) filterSecDefaultActionFromFileContent(content string) string {
+	lines := strings.Split(content, "\n")
+	var filteredLines []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip SecDefaultAction directives (case-insensitive)
+		if !strings.HasPrefix(strings.ToLower(trimmed), "secdefaultaction") {
+			filteredLines = append(filteredLines, line)
+		} else {
+			if m.logger != nil {
+				m.logger.Debug("Skipping file-based SecDefaultAction due to override", 
+					zap.String("line", trimmed))
+			}
+		}
+	}
+
+	return strings.Join(filteredLines, "\n")
+}
+
 // processIncludedFile reads and processes an included file, filtering SecDefaultAction if needed
 func (m *corazaModule) processIncludedFile(config coraza.WAFConfig, filename string) (coraza.WAFConfig, error) {
 	if m.ResponseOverride == nil || !m.ResponseOverride.OverrideFileDefaults {
@@ -222,8 +243,8 @@ func (m *corazaModule) processIncludedFile(config coraza.WAFConfig, filename str
 		return config, fmt.Errorf("failed to read included file %s: %w", filename, err)
 	}
 
-	// Filter out SecDefaultAction directives
-	filteredContent := m.processDirectives(string(content))
+	// Filter out SecDefaultAction directives from file content
+	filteredContent := m.filterSecDefaultActionFromFileContent(string(content))
 	
 	if m.logger != nil {
 		m.logger.Debug("Processing included file with override", 
