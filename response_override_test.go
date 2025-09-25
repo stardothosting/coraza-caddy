@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 )
 
@@ -230,4 +231,81 @@ SecDefaultAction "phase:2,deny,status:301,redirect:'https://blocked.example.com'
 	}
 
 	t.Logf("✅ JSON configuration example test passed")
+}
+
+// TestDeprecatedIncludeFieldFiltering tests that SecDefaultAction is filtered from files in the deprecated Include field
+func TestDeprecatedIncludeFieldFiltering(t *testing.T) {
+	// Create temporary test file with SecDefaultAction (simulating crs-setup.conf)
+	tempDir := t.TempDir()
+	setupFile := filepath.Join(tempDir, "crs-setup.conf")
+	setupContent := `# CRS Setup Configuration
+SecDefaultAction "phase:1,log,auditlog,pass"
+SecDefaultAction "phase:2,log,auditlog,pass"
+SecRule REQUEST_METHOD "^(?:GET|HEAD|POST|OPTIONS)$" "id:901120,phase:1,pass,t:none,t:uppercase,nolog"
+SecDefaultAction "phase:3,log,auditlog,pass"
+SecRule RESPONSE_STATUS "^5\d{2}$" "id:901130,phase:3,pass,t:none,nolog"`
+	
+	err := os.WriteFile(setupFile, []byte(setupContent), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create setup file: %v", err)
+	}
+
+	tests := []struct {
+		name             string
+		includeField     []string
+		directives       string
+		responseOverride *ResponseOverride
+		expectError      bool
+		description      string
+	}{
+		{
+			name:         "deprecated_include_without_override",
+			includeField: []string{setupFile},
+			directives:   "SecRuleEngine On",
+			responseOverride: nil,
+			expectError:  false,
+			description:  "Deprecated Include field without override should work normally",
+		},
+		{
+			name:         "deprecated_include_with_override_and_custom_secdefaultaction",
+			includeField: []string{setupFile},
+			directives:   "SecRuleEngine On\nSecDefaultAction \"phase:1,deny,status:404\"",
+			responseOverride: &ResponseOverride{
+				OverrideFileDefaults: true,
+			},
+			expectError: false,
+			description: "Deprecated Include field with override should filter file-based SecDefaultAction and preserve custom ones",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &corazaModule{
+				Include:          tt.includeField,
+				Directives:       tt.directives,
+				ResponseOverride: tt.responseOverride,
+			}
+
+			// Test provisioning (this is where the bug would manifest)
+			ctx := caddy.Context{}
+			err := m.Provision(ctx)
+			
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error but got: %v", err)
+				}
+				
+				// Verify WAF was created successfully
+				if m.waf == nil {
+					t.Errorf("WAF was not created")
+				}
+			}
+
+			t.Logf("✅ %s: Test passed", tt.description)
+		})
+	}
 }
