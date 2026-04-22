@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/caddyserver/caddy/v2"
@@ -54,12 +55,21 @@ func (p *pooledWAF) Destruct() error {
 	return err
 }
 
+// ResponseOverride defines custom WAF response behavior at HTTP level.
+// This allows WAF-as-a-Service deployments to customize blocked responses
+// without revealing WAF presence (e.g., returning 404 instead of 403).
+type ResponseOverride struct {
+	StatusMappings map[int]int       `json:"status_mappings,omitempty"`
+	CustomHeaders  map[string]string `json:"custom_headers,omitempty"`
+}
+
 // corazaModule is a Web Application Firewall implementation for Caddy.
 type corazaModule struct {
 	// deprecated
-	Include      []string `json:"include"`
-	Directives   string   `json:"directives"`
-	LoadOWASPCRS bool     `json:"load_owasp_crs"`
+	Include          []string          `json:"include"`
+	Directives       string            `json:"directives"`
+	LoadOWASPCRS     bool              `json:"load_owasp_crs"`
+	ResponseOverride *ResponseOverride `json:"response_override,omitempty"`
 
 	logger  *zap.Logger
 	waf     coraza.WAF
@@ -204,14 +214,35 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 			Err:        err,
 		}
 	} else if it != nil {
+		// Extract rule information for logging
+		ruleID, ruleFile := "unknown", "unknown"
+		matchedRules := tx.MatchedRules()
+		for _, rule := range matchedRules {
+			if rule.Rule().File() != "_inline_" {
+				ruleID = fmt.Sprintf("%d", rule.Rule().ID())
+				ruleFile = rule.Rule().File()
+			}
+		}
+
+		clientIP := r.RemoteAddr
+		if idx := strings.Index(clientIP, ":"); idx != -1 {
+			clientIP = clientIP[:idx]
+		}
+
 		m.logger.Error("WAF rule violation detected",
 			zap.String("hostname", r.Host),
 			zap.String("uri", r.RequestURI),
-			zap.String("client_ip", r.RemoteAddr),
+			zap.String("client_ip", clientIP),
 			zap.String("unique_id", tx.ID()),
+			zap.String("rule_id", ruleID),
+			zap.String("rule_file", ruleFile),
 		)
+
+		originalStatusCode := obtainStatusCodeFromInterruptionOrDefault(it, http.StatusOK)
+		finalStatusCode := m.applyResponseOverride(originalStatusCode, w)
+
 		return caddyhttp.HandlerError{
-			StatusCode: obtainStatusCodeFromInterruptionOrDefault(it, http.StatusOK),
+			StatusCode: finalStatusCode,
 			ID:         tx.ID(),
 			Err:        errInterruptionTriggered,
 		}
@@ -225,6 +256,27 @@ func (m corazaModule) ServeHTTP(w http.ResponseWriter, r *http.Request, next cad
 	}
 
 	return processResponse(tx, r)
+}
+
+// applyResponseOverride applies HTTP-level response customization
+func (m *corazaModule) applyResponseOverride(originalStatusCode int, w http.ResponseWriter) int {
+	if m.ResponseOverride == nil {
+		return originalStatusCode
+	}
+
+	if m.ResponseOverride.CustomHeaders != nil {
+		for key, value := range m.ResponseOverride.CustomHeaders {
+			w.Header().Set(key, value)
+		}
+	}
+
+	if m.ResponseOverride.StatusMappings != nil {
+		if mappedStatusCode, exists := m.ResponseOverride.StatusMappings[originalStatusCode]; exists {
+			return mappedStatusCode
+		}
+	}
+
+	return originalStatusCode
 }
 
 // Unmarshal Caddyfile implements caddyfile.Unmarshaler.
@@ -259,9 +311,59 @@ func (m *corazaModule) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			case "directives":
 				m.Directives = value
 			}
+		case "response_override":
+			if m.ResponseOverride == nil {
+				m.ResponseOverride = &ResponseOverride{
+					StatusMappings: make(map[int]int),
+					CustomHeaders:  make(map[string]string),
+				}
+			}
+			for d.NextBlock(1) {
+				if err := m.parseResponseOverride(d); err != nil {
+					return err
+				}
+			}
 		default:
 			return d.Errf("invalid key %q", key)
 		}
+	}
+
+	return nil
+}
+
+// parseResponseOverride parses response override configuration from Caddyfile
+func (m *corazaModule) parseResponseOverride(d *caddyfile.Dispenser) error {
+	key := d.Val()
+
+	switch key {
+	case "status_mapping":
+		var originalStr, mappedStr string
+		if !d.Args(&originalStr, &mappedStr) {
+			return d.ArgErr()
+		}
+
+		original, err := strconv.Atoi(originalStr)
+		if err != nil {
+			return d.Errf("invalid original status code: %s", originalStr)
+		}
+
+		mapped, err := strconv.Atoi(mappedStr)
+		if err != nil {
+			return d.Errf("invalid mapped status code: %s", mappedStr)
+		}
+
+		m.ResponseOverride.StatusMappings[original] = mapped
+
+	case "custom_header":
+		var headerName, headerValue string
+		if !d.Args(&headerName, &headerValue) {
+			return d.ArgErr()
+		}
+
+		m.ResponseOverride.CustomHeaders[headerName] = headerValue
+
+	default:
+		return d.Errf("unknown response override key: %s", key)
 	}
 
 	return nil
